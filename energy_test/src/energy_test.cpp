@@ -21,23 +21,22 @@
 #include <stdio.h>
 #include <fstream>
 #include <algorithm>
-#include <stdio.h>
 #include <cmath>
-#include "cuda.h"
 #include <vector>
 #include <time.h>
-#include <algorithm>
-#include <cmath>
 #include <cstdlib>
 #include <exception>
-#include <fstream>
-#include <iostream>
 #include <map>
 #include <random>
 #include <string>
-#include <vector>
 #include <iomanip>
 #include <sstream>
+
+#include "args.hxx"
+
+double delta = 0.5;
+double divisor = 2 / (256.0 * 2 * delta * delta);
+
 
 //#############################################################################
 //! A vector addition kernel.
@@ -90,9 +89,143 @@ public:
     }
 };
 
-auto main()
+//A and B are the samples we are calculating between
+class compute_distance{
+    ALPAKA_NO_HOST_ACC_WARNING
+    template<
+        typename TAcc,
+        typename TElem,
+        typename TIdx>
+    ALPAKA_FN_ACC auto operator()(
+        TAcc const & acc,
+        TElem const * const A,
+        TElem const * const B,
+        TElem * const C,
+        TIdx const & numElementsA,
+        TIdx const & numElementsB) const
+        -> void {
+            static_assert(
+            alpaka::dim::Dim<TAcc>::value == 5,
+            " Expect 5-dimensional indices phase space variables\n Use dummy values of zeros if needed!");
+
+        TIdx const gridThreadIdx(alpaka::idx::getIdx<alpaka::Grid, alpaka::Threads>(acc)[0u]);
+        TIdx const threadElemExtent(alpaka::workdiv::getWorkDiv<alpaka::Thread, alpaka::Elems>(acc)[0u]);
+        TIdx const threadFirstElemIdx(gridThreadIdx * threadElemExtent);
+
+        if(threadFirstElemIdx < numElementsA)
+        {
+            // Calculate the number of elements to compute in this thread.
+            // The result is uniform for all but the last thread.
+            TIdx const threadLastElemIdx(threadFirstElemIdx+threadElemExtent);
+            TIdx const threadLastElemIdxClipped((numElementsA > threadLastElemIdx) ? threadLastElemIdx : numElementsA);
+            //compute the T value contributon
+            for(TIdx i(threadFirstElemIdx); i<threadLastElemIdxClipped; i++)
+            { 
+                double mySum = 0;
+                auto event_A = A[i];
+                for(TIdx j(i); j < numElementsB;j++){
+                    double dist = 0;
+                    double diff = (event_A[0] - B[j][0]);
+                    dist += diff*diff;
+                    diff = (event_A[1] - B[j][1]);
+                    dist += diff*diff;
+                    diff = (event_A[2] - B[j][2]);
+                    dist += diff*diff;
+                    diff = (event_A[3] - B[j][3]);
+                    dist += diff*diff;
+                    diff = (event_A[4] - B[j][4]);
+                    dist += diff*diff;
+                    mySum += exp(-0.5*dist/delta/delta);
+                }
+                C[i] += mySum;
+            }
+        }
+    }
+};
+struct Event {
+  double s12;
+  double s13;
+  double s24;
+  double s34;
+  double s134;
+  double half_mag_squared;
+};
+
+const std::vector<Event> read_file(const std::string filename, const size_t n_events) {
+  std::fstream file(filename, std::ios_base::in);
+  if (!file)
+    throw std::runtime_error("Error opening file " + filename);
+
+  std::vector<Event> events;
+  events.reserve(std::min((size_t)5000000, n_events));
+
+  std::string line;
+  while (std::getline(file, line) && events.size() < n_events) {
+    std::istringstream iss(line);
+    Event e;
+    iss >> e.s12 >> e.s13 >> e.s24 >> e.s34 >> e.s134;
+    if (iss.fail())
+      throw std::runtime_error("Error reading line " + std::to_string(events.size()+1) + " in " + filename);
+    e.half_mag_squared = 0.5 * (e.s12*e.s12 + e.s13*e.s13 + e.s24*e.s24 + e.s34*e.s34 + e.s134*e.s134);
+    events.push_back(e);
+  }
+  return events;
+}
+auto main(int argc, char *argv[])
 -> int
 {
+
+args::ArgumentParser parser("CPU based energy test");
+args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
+args::Flag permutations_only(parser, "permutations only", "Only calculate permutations", {"permutations-only"});
+args::Flag output_write(parser, "output write", "write output Tvalues", {"output-write"});
+args::ValueFlag<size_t> n_permutations(parser, "n_permutations", "Number of permutations to run", {"n-permutations"});
+args::ValueFlag<size_t> max_events_1(parser, "max events 1", "Maximum number of events to use from dataset 1", {"max-events-1"});
+args::ValueFlag<size_t> max_events_2(parser, "max events 2", "Maximum number of events to use from dataset 2", {"max-events-2"});
+args::ValueFlag<size_t> max_events(parser, "max events", "Max number of events in each dataset", {"max-events"});
+args::ValueFlag<size_t> seed(parser, "seed", "seed for permutations", {"seed"});
+args::ValueFlag<size_t> max_permutation_events_1(parser, "max permutation events 1", "Max number of events in dataset 1 for permutations",
+                                                {"max-permutation-events-1"});
+args::ValueFlag<double> delta_value(parser, "delta value", "delta_value", {"delta-value"});
+args::Positional<std::string> filename_1(parser, "dataset 1", "Filename for the first dataset");
+args::Positional<std::string> filename_2(parser, "dataset 2", "Filename for the second dataset");
+args::Positional<std::string> output_fn(parser, "output filename", "Output filename for the permutation test statistics", {"output-fn"});
+
+try {
+parser.ParseCLI(argc, argv);
+if (!filename_1 || !filename_2)
+    throw args::ParseError("Two dataset filenames must be given");
+if ((max_events_1 || max_events_2) && max_events)
+    throw args::ParseError("--max-events cannot be used with --max-events-1 or --max-events-2");
+} catch (args::Help) {
+std::cout << parser;
+return 0;
+} catch (args::ParseError e) {
+std::cerr << e.what() << std::endl;
+std::cerr << parser;
+return 1;
+}
+
+// set delta
+if (delta_value) {
+delta = args::get(delta_value);
+}
+std::cout << "Distance parameter set to " << delta << std::endl;
+divisor = 2 / (256.0 * 2 * delta * delta);
+
+// Parse the maximum number of events to use
+size_t data_1_limit = std::numeric_limits<size_t>::max();
+size_t data_2_limit = std::numeric_limits<size_t>::max();
+
+if (max_events) {
+data_1_limit = args::get(max_events);
+data_2_limit = args::get(max_events);
+} else {
+if (max_events_1)
+    data_1_limit = args::get(max_events_1);
+if (max_events_2)
+    data_2_limit = args::get(max_events_2);
+}
 // Fallback for the CI with disabled sequential backend
 #if defined(ALPAKA_CI) && !defined(ALPAKA_ACC_CPU_B_SEQ_T_SEQ_ENABLED)
     return EXIT_SUCCESS;

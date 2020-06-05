@@ -1,0 +1,1 @@
+cmake .. -DALPAKA_ACC_GPU_CUDA_ENABLE=false #enable or disable cuda support

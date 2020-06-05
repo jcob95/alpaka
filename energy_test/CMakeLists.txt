@@ -44,6 +44,7 @@ endif()
 alpaka_add_executable(
     ${_TARGET_NAME}
     src/energy_test.cpp
+    src/args.hxx
     )
 target_link_libraries(
     ${_TARGET_NAME}
