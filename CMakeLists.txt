@@ -138,7 +138,7 @@ endif()
 if(BUILD_TESTING)
     add_subdirectory("test/")
 endif()
-
+add_subdirectory("energy_test/")
 ################################################################################
 # Installation.
 include(CMakePackageConfigHelpers)
