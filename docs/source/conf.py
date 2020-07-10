@@ -110,7 +110,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'alpaka', u'Alpaka Documentation',
+    (master_doc, 'alpaka', u'alpaka Documentation',
      [author], 1)
 ]
 
@@ -148,10 +148,22 @@ breathe_domain_by_extension = {
     "tpp":   "cpp"
 }
 
+# define alpaka attributes
+# breath has problems to parse C++ attributes
+cpp_id_attributes = ["ALPAKA_FN_ACC",
+                     "ALPAKA_FN_HOST",
+                     "ALPAKA_FN_HOST_ACC",
+                     "ALPAKA_FN_INLINE",
+                     "ALPAKA_NO_HOST_ACC_WARNING",
+                     "ALPAKA_STATIC_ACC_MEM_CONSTANT",
+                     "ALPAKA_STATIC_ACC_MEM_GLOBAL",
+                     ]
+
 # -- processing --
 
 if on_rtd:
-    subprocess.call('cd ../doxygen; doxygen', shell=True)
+    subprocess.call('cd ..; doxygen', shell=True)
+    subprocess.call('cd ../cheatsheet; rst2pdf -s cheatsheet.style ../source/usage/cheatsheet.rst -o cheatsheet.pdf', shell=True)
 else:
     import sphinx_rtd_theme
     html_theme = "sphinx_rtd_theme"
