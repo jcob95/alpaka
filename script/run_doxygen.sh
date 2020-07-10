@@ -3,7 +3,7 @@
 #
 # Copyright 2020 Benjamin Worpitz
 #
-# This file is part of Alpaka.
+# This file is part of alpaka.
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -29,10 +29,9 @@ git clone -b gh-pages https://x-access-token:${2}@github.com/${1}.git docs/doxyg
 
 cd docs/
 
-rm -rf doxygen/*
+rm -rf doxygen/html/*
+rm -rf doxygen/xml/*
 
-# enable HTML output in our Doxyfile
-sed -i -E 's/(GENERATE_HTML\s*=\s*)NO/\1YES/g' Doxyfile
 doxygen Doxyfile
 
 cd ../
